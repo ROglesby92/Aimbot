@@ -17,14 +17,15 @@ WRITING VALUES
 // Found offsets from ASSAULT_CUBE base address.
 struct AC_PLAYER_OFFSETS
 {
-	UINT32 playerXPos;
-	UINT32 playerYPos;
-	UINT32 playerZPos;
+	UINT32 playerXPos = 0x34;
+	UINT32 playerYPos = 0x36;
+	UINT32 playerZPos = 0x38;
 	UINT32 playerXmouse = 0x40; // Up down
 	UINT32 playerYmouse = 0x44; // Rotation
 	UINT32 assaultRifleAmmo = 0x150;
 	UINT32 playerHealth = 0xF8;
 	UINT32 playerArmor = 0xFC;
+	UINT32 playerTeam = 0x32C;
 };
 
 struct PLAYER_VARS
@@ -34,8 +35,9 @@ struct PLAYER_VARS
 	float playerXPos;
 	float playerYPos;
 	float playerZPos;
-	DWORD playerXmouse;
-	DWORD playerYmouse;
+	float playerXmouse;
+	float playerYmouse;
+	int playerTeam;
 };
 
 
@@ -79,10 +81,26 @@ bool ObtainPlayerData(Bypass* hook, uintptr_t bPointer, AC_PLAYER_OFFSETS pOffse
 	RPM = hook->Read((bPointer+pOffset.playerArmor),&player->playerArmor,sizeof(player->playerArmor));
 	RPM = hook->Read((bPointer+pOffset.playerXmouse),&player->playerXmouse,sizeof(player->playerXmouse));
 	RPM = hook->Read((bPointer+pOffset.playerYmouse),&player->playerYmouse,sizeof(player->playerYmouse));
+	//RPM = hook->Read((bPointer+pOffset.playerXPos),&player->playerXPos,sizeof(player->playerXPos));
+	//RPM = hook->Read((bPointer+pOffset.playerYPos),&player->playerYPos,sizeof(player->playerYPos));
+	//RPM = hook->Read((bPointer+pOffset.playerZPos),&player->playerZPos,sizeof(player->playerZPos));
+	//RPM = hook->Read((bPointer+pOffset.playerTeam),&player->playerTeam,sizeof(player->playerTeam));
 	return RPM;
 }
 
+void PrintOutVariables(PLAYER_VARS player)
+{
 
+	printf("CURRENT Health: %u \n", player.playerHealth);
+	printf("CURRENT Armor: %u \n", player.playerArmor);
+	printf("CURRENT Mouse X: %.6f  \n", player.playerXmouse);
+	printf("CURRENT Mouse Y: %.6f \n",player.playerYmouse);
+	printf("CURRENT X Position: %.6f \n",player.playerXPos);
+	printf("CURRENT Y Position: %.6f \n",player.playerYPos);
+	printf("CURRENT Z Position: %.6f \n",player.playerZPos);
+	fflush(stdout);
+
+}
 
 
 int main()
@@ -95,8 +113,8 @@ int main()
 	uintptr_t BASE_ADDRESS = 0x509B74;
 	uintptr_t BASE_POINTER;
 
-	uintptr_T BASE_ADDRESS_ENEMY1;
-	uintptr_T BASE_ADDRESS_ENEMY2;
+	uintptr_t BASE_ADDRESS_ENEMY1;
+	uintptr_t BASE_ADDRESS_ENEMY2;
 	uintptr_t BASE_POINTER_ENEMY1;
 	uintptr_t BASE_POINTER_ENEMY2;
 
@@ -104,11 +122,11 @@ int main()
 	DWORD BASE_DEREFERENCE = 0x0;
 
 
-	cout << "Searching for Gamewindow..."<< endl;
+	cout << "Searching for Gamewindow. . ."<< endl;
 	HWND hwnd = FindWindow(NULL, "AssaultCube");
 	if(hwnd == NULL)
 	{
-		cout << " Cannot locate window.. Exiting.";
+		cout << "Cannot locate window. . .\nExiting.";
 		exit(-1);
 	}
 	cout << "Gamewindow found!" << endl << endl;
@@ -116,7 +134,7 @@ int main()
 	GetWindowThreadProcessId(hwnd,&pid);
 	if(pid==0)
 	{
-		cout << "Cannot get PID.. Exiting.";
+		cout << "Cannot get PID. . . Exiting.";
 		exit(-1);
 	}
 	cout <<"PID Found" << endl << endl;
@@ -134,11 +152,12 @@ int main()
 	if(!bypass->Read(BASE_ADDRESS,&BASE_DEREFERENCE,sizeof(BASE_DEREFERENCE)))
 	{
 		cout << "Could not get base address pointer. . . " << endl;
+		exit(-1);
 	}
 
 	BASE_POINTER = BASE_DEREFERENCE;
-	cout << "Dereference located: " << uppercase << hex << &BASE_POINTER << endl;
-	cout << "Press any key to being reading active memory";
+	cout << "Player Base Pointer: " << uppercase << hex << &BASE_POINTER << endl;
+	cout << "Press any key to being reading player active memory";
 	cin.ignore();
 	bool doExit = false;
 	while(!doExit)
@@ -152,17 +171,12 @@ int main()
 			//TODO Get Enemy data.
 			system("clear");
 			printf("Press EXIT to stop. \n");
-			printf("CURRENT Health: %u \n", current.playerHealth);
-			printf("CURRENT Armor: %u \n", current.playerArmor);
-			printf("CURRENT Mouse X: %u  \n", current.playerXmouse);
-			printf("CURRENT Mouse Y: %u \n", current.playerYmouse);
-			fflush(stdout);
-
-			if(GetAsyncKeyState(VK_ESCAPE))
+			PrintOutVariables(current);
+			if(GetAsyncKeyState(VK_F1))
 			{
 				doExit = true;
 			}
-			Sleep(50);
+			Sleep(100);
 		}
 	cout << "Exiting . . ." << endl;
 	exit(0);
