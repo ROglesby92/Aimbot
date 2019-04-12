@@ -3,7 +3,10 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <stdint.h>
+#include "Math.h"
 using namespace std;
+
+
 /*
 First project attempting to read game memory to implement features such as:
 
@@ -17,27 +20,27 @@ WRITING VALUES
 // Found offsets from ASSAULT_CUBE base address.
 struct AC_PLAYER_OFFSETS
 {
-	UINT32 playerXPos = 0x34;
-	UINT32 playerYPos = 0x36;
-	UINT32 playerZPos = 0x38;
-	UINT32 playerXmouse = 0x40; // Up down
-	UINT32 playerYmouse = 0x44; // Rotation
-	UINT32 assaultRifleAmmo = 0x150;
+	UINT32 playerXPos = 0x04;
+	UINT32 playerHeadPos = 0x08;
+	UINT32 playerYPos = 0x3C;
+	UINT32 playerZPos = 0x0C; // 0x0A
+	UINT32 playerXmouse = 0x44;
+	UINT32 playerYmouse = 0x40;
 	UINT32 playerHealth = 0xF8;
 	UINT32 playerArmor = 0xFC;
 	UINT32 playerTeam = 0x32C;
+	UINT32 assaultRifleAmmo = 0x150;
 };
 
-struct PLAYER_VARS
+struct PlayerDataVector
 {
-	DWORD playerHealth;
-	DWORD playerArmor;
+	int playerHealth;
 	float playerXPos;
 	float playerYPos;
+	float playerHeadPos;
 	float playerZPos;
 	float playerXmouse;
 	float playerYmouse;
-	int playerTeam;
 };
 
 
@@ -57,7 +60,6 @@ private:
 };
 
 Bypass::Bypass() {}
-
 Bypass::~Bypass() {
 	if (m_hProcess != NULL) CloseHandle(m_hProcess);
 }
@@ -72,55 +74,88 @@ bool Bypass::Write(uintptr_t lpBaseAddress, void* lpBuffer, SIZE_T nSize, SIZE_T
 	if (WriteProcessMemory(m_hProcess, (LPVOID)lpBaseAddress, lpBuffer, nSize, lpNumberOfBytesWritten)) return true; return false;
 }
 
+float Get3dDistance(PlayerDataVector source, PlayerDataVector dest);
+
 
 // Takes a base address of player, and applies values with pointer offsets.
-bool ObtainPlayerData(Bypass* hook, uintptr_t bPointer, AC_PLAYER_OFFSETS pOffset, PLAYER_VARS *player)
+bool ObtainPlayerData(Bypass* hook, uintptr_t bPointer, AC_PLAYER_OFFSETS pOffset, PlayerDataVector *player)
 {
 	bool RPM = true;
 	RPM = hook->Read((bPointer+pOffset.playerHealth),&player->playerHealth,sizeof(player->playerHealth));
-	RPM = hook->Read((bPointer+pOffset.playerArmor),&player->playerArmor,sizeof(player->playerArmor));
 	RPM = hook->Read((bPointer+pOffset.playerXmouse),&player->playerXmouse,sizeof(player->playerXmouse));
 	RPM = hook->Read((bPointer+pOffset.playerYmouse),&player->playerYmouse,sizeof(player->playerYmouse));
-	//RPM = hook->Read((bPointer+pOffset.playerXPos),&player->playerXPos,sizeof(player->playerXPos));
-	//RPM = hook->Read((bPointer+pOffset.playerYPos),&player->playerYPos,sizeof(player->playerYPos));
-	//RPM = hook->Read((bPointer+pOffset.playerZPos),&player->playerZPos,sizeof(player->playerZPos));
-	//RPM = hook->Read((bPointer+pOffset.playerTeam),&player->playerTeam,sizeof(player->playerTeam));
+	RPM = hook->Read((bPointer+pOffset.playerXPos),&player->playerXPos,sizeof(player->playerXPos));
+	RPM = hook->Read((bPointer+pOffset.playerYPos),&player->playerYPos,sizeof(player->playerYPos));
+	RPM = hook->Read((bPointer+pOffset.playerZPos),&player->playerZPos,sizeof(player->playerZPos));
+	RPM = hook->Read((bPointer+pOffset.playerHeadPos),&player->playerHeadPos,sizeof(player->playerHeadPos));
 	return RPM;
 }
 
-void PrintOutVariables(PLAYER_VARS player)
+void PrintOutVariables(PlayerDataVector player,int playerNum)
 {
 
-	printf("CURRENT Health: %u \n", player.playerHealth);
-	printf("CURRENT Armor: %u \n", player.playerArmor);
-	printf("CURRENT Mouse X: %.6f  \n", player.playerXmouse);
-	printf("CURRENT Mouse Y: %.6f \n",player.playerYmouse);
-	printf("CURRENT X Position: %.6f \n",player.playerXPos);
-	printf("CURRENT Y Position: %.6f \n",player.playerYPos);
-	printf("CURRENT Z Position: %.6f \n",player.playerZPos);
-	fflush(stdout);
+	printf("PLAYER %d \n",playerNum);
+	printf("Health: %u \n", player.playerHealth);
+	printf("Mouse X: %.6f  \n", player.playerXmouse);
+	printf("Mouse Y: %.6f \n",player.playerYmouse);
+	printf("X Position: %.6f \n",player.playerXPos);
+	printf("Y Position: %.6f \n",player.playerYPos);
+	printf("Z Position: %.6f \n",player.playerZPos);
+	printf("Head Position: %.6f \n",player.playerHeadPos);
+	printf("----------------------------------\n");
 
+}
+
+
+
+float GetPitch(PlayerDataVector enemy, PlayerDataVector player)
+{
+	float pitchX = (float)atan2(enemy.playerZPos - player.playerZPos, Get3dDistance(enemy,player)) * 180 / 3.1459265f;
+	return pitchX;
+
+}
+float GetYaw(PlayerDataVector enemy, PlayerDataVector player)
+{
+	float yawY = -(float)atan2(enemy.playerXPos - player.playerXPos, enemy.playerHeadPos - player.playerHeadPos ) / 3.1459265f * 180 + 180;
+	return yawY;
+
+}
+
+float Get3dDistance(PlayerDataVector source, PlayerDataVector dest)
+{
+	return (float)(sqrt
+		(
+	pow((source.playerXPos - dest.playerXPos),2) +
+	pow((source.playerYPos - dest.playerYPos),2) +
+	pow((source.playerHeadPos - dest.playerHeadPos),2)
+));
 }
 
 
 int main()
 {
-
+	/*Aimbot variables*/
+	float _PI = 3.1459265f;
+	bool enemyFocused = false;
+	int focusTarget = -1;
+	/*Memory address and offset variables*/
 	AC_PLAYER_OFFSETS player;
-	PLAYER_VARS current;
-	PLAYER_VARS enemyOne;
+
+	PlayerDataVector current;
+	PlayerDataVector enemyOne;
 	// Static base adress 0x400000 + 109B74
 	uintptr_t BASE_ADDRESS = 0x509B74;
 	uintptr_t BASE_POINTER;
-
-	uintptr_t BASE_ADDRESS_ENEMY1;
-	uintptr_t BASE_ADDRESS_ENEMY2;
+	uintptr_t BASE_ADDRESS_ENEMY1 = 0x510D90;
 	uintptr_t BASE_POINTER_ENEMY1;
-	uintptr_t BASE_POINTER_ENEMY2;
+	//uintptr_t BASE_ADDRESS_ENEMY2;
+	//uintptr_t BASE_POINTER_ENEMY2;
 
+
+	/*#####################################*/
 	DWORD pid=0;
 	DWORD BASE_DEREFERENCE = 0x0;
-
+	DWORD BASE_DEREFERENCE_EM1 = 0x0;
 
 	cout << "Searching for Gamewindow. . ."<< endl;
 	HWND hwnd = FindWindow(NULL, "AssaultCube");
@@ -151,33 +186,103 @@ int main()
 
 	if(!bypass->Read(BASE_ADDRESS,&BASE_DEREFERENCE,sizeof(BASE_DEREFERENCE)))
 	{
-		cout << "Could not get base address pointer. . . " << endl;
+		cout << "Could not get player base address pointer. . . " << endl;
+		cout << "Exiting . . ." << endl;
+		delete bypass;
 		exit(-1);
 	}
-
 	BASE_POINTER = BASE_DEREFERENCE;
-	cout << "Player Base Pointer: " << uppercase << hex << &BASE_POINTER << endl;
-	cout << "Press any key to being reading player active memory";
+	// Enemy one base address.
+	if(!bypass->Read(BASE_ADDRESS_ENEMY1,&BASE_DEREFERENCE_EM1,sizeof(BASE_DEREFERENCE_EM1)))
+	{
+		cout << "Could not get enemy one base address pointer. . . " << endl;
+		cout << "Exiting . . ." << endl;
+	  delete bypass;
+		exit(-1);
+	}
+	// Second dereference.
+	BASE_POINTER_ENEMY1 = BASE_DEREFERENCE_EM1;
+	if(!bypass->Read(BASE_POINTER_ENEMY1,&BASE_DEREFERENCE_EM1,sizeof(BASE_DEREFERENCE_EM1)))
+	{
+		cout << "Could not get enemy one base address pointer offset. . . " << endl;
+		cout << "Exiting . . ." << endl;
+		delete bypass;
+		exit(-1);
+	}
+	BASE_POINTER_ENEMY1 = BASE_DEREFERENCE_EM1;
+
+	//cout << "Player Base Pointer: " << uppercase << hex << &BASE_POINTER << endl;
+	cout << "Press any key to being reading active memory";
 	cin.ignore();
 	bool doExit = false;
+	bool aimBotEnabled = false;
+	bool godMode = false;
+	int intToWrite = 1337;
 	while(!doExit)
 		{
 			// Get pointer offset values, store into player.
 			if(!(ObtainPlayerData(bypass,BASE_POINTER,player,&current)))
 			{
 				cout << "Could not get all player memory. . . ";
+				cout << "Exiting . . ." << endl;
+				delete bypass;
 				exit(-1);
 			}
-			//TODO Get Enemy data.
+			if(!(ObtainPlayerData(bypass,BASE_POINTER_ENEMY1,player,&enemyOne)))
+			{
+				cout << "Could not get all enemy memory. . . ";
+				cout << "Exiting . . ." << endl;
+				delete bypass;
+				exit(-1);
+			}
+			if(godMode)
+			{
+				//GIVE HEALTH.
+				if(!bypass->Write((BASE_POINTER+player.playerHealth),&intToWrite,sizeof(intToWrite)))
+				{
+					cout << "Could not write to player memory. . . ";
+					cout << "Exiting . . ." << endl;
+					delete bypass;
+					exit(-1);
+				}
+			}
 			system("clear");
-			printf("Press EXIT to stop. \n");
-			PrintOutVariables(current);
-			if(GetAsyncKeyState(VK_F1))
+			printf("Press F1 to Start Aim bot. \n");
+			printf("Press F2 for god mode(1337 HP). \n");
+			printf("Press F4 to stop program. \n");
+			printf("DIST TO ENEMY: %.6f \n",Get3dDistance(current,enemyOne));
+			printf("AIMBOT X: %.6f \n",GetPitch(enemyOne,current));
+			printf("AIMBOT Y: %.6f \n",GetYaw(enemyOne,current));
+			PrintOutVariables(current,0);
+			PrintOutVariables(enemyOne,1);
+			fflush(stdout);
+
+			if(GetAsyncKeyState(VK_F4))
 			{
 				doExit = true;
 			}
-			Sleep(100);
+			if(GetAsyncKeyState(VK_F2))
+			{
+				godMode = true;
+			}
+			if(GetAsyncKeyState(VK_F1))
+			{
+				aimBotEnabled = true;
+			}
+
+			// User shooting while aimbot enabled.
+			if(((GetKeyState(VK_LBUTTON) & 0x100) != 0) && aimBotEnabled)
+			{
+				//AimAtTarget(player,enemyOne,current,bypass,BASE_ADDRESS);
+				float newY = GetYaw(enemyOne,current);
+			  float newX = GetPitch(enemyOne,current);
+				bool status;
+				status = !bypass->Write((BASE_POINTER+player.playerXmouse),&newX,sizeof(newX));
+				status = !bypass->Write((BASE_POINTER+player.playerYmouse),&newY,sizeof(newY));
+			}
+			if(!aimBotEnabled){Sleep(100);}
 		}
+	;
 	cout << "Exiting . . ." << endl;
 	exit(0);
 }
