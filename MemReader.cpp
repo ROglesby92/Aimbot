@@ -4,32 +4,40 @@
 #include <commctrl.h>
 #include <stdint.h>
 #include "Math.h"
+#include <sstream>
 using namespace std;
 
+HDC HDC_Desktop;
+HBRUSH EnemyBrush;
+HBRUSH FriendlyBrush;
+HBRUSH currentBrush;
+HFONT Font;
+RECT m_Rect;
+HWND TargetWnd;
+HWND drawHandle;
+DWORD DwProcId;
+COLORREF EnemyCOLOR;
+COLORREF FriendCOLOR;
+COLORREF CurrentCOLOR;
+COLORREF NameCOLOR;
 
-/*
-First project attempting to read game memory to implement features such as:
 
-Make CLASS
-GET ENEMY ADRESSES
 
-AIMBOT
-ESP
-WRITING VALUES
-*/
+
 // Found offsets from ASSAULT_CUBE base address.
 struct AC_PLAYER_OFFSETS
 {
 	UINT32 playerXPos = 0x04;
-	UINT32 playerHeadPos = 0x08;
-	UINT32 playerYPos = 0x3C;
+	UINT32 playerYPos = 0x08;
 	UINT32 playerZPos = 0x0C;
+	UINT32 playerZBodyPos = 0x3C;
 	UINT32 playerXmouse = 0x44;
 	UINT32 playerYmouse = 0x40;
 	UINT32 playerHealth = 0xF8;
 	UINT32 playerArmor = 0xFC;
 	UINT32 playerTeam = 0x32C;
 	UINT32 assaultRifleAmmo = 0x150;
+	UINT32 playerName = 0x225;
 }offsets;
 
 struct Addresses
@@ -38,6 +46,7 @@ struct Addresses
 	const DWORD entityList = 0x50F4F8;
 	const DWORD playerBase = 0x509B74;
 	const DWORD enemyOneBase = 0x510D90;
+	const DWORD viewMatrix = 0x501AE8;
 }addresses;
 
 
@@ -46,13 +55,18 @@ struct PlayerDataVector
 	int playerHealth;
 	float playerXPos;
 	float playerYPos;
-	float playerHeadPos;
+	float playerZBody;
 	float playerZPos;
 	float playerXmouse;
 	float playerYmouse;
 	int playerTeam;
+	char playerName[24];
 };
 
+class Vec3 {
+public:
+	float x, y, z;
+};
 
 class Bypass {
 public:
@@ -89,7 +103,47 @@ bool ObtainPlayerData(Bypass* hook, uintptr_t bPointer, PlayerDataVector *player
 void PrintOutVariables(PlayerDataVector player,int playerNum);
 float GetPitch(PlayerDataVector enemy, PlayerDataVector player);
 float GetYaw(PlayerDataVector enemy, PlayerDataVector player);
+bool WorldToScreen(Vec3 In, Vec3& Out, float *viewMatrix);
+void DrawString(int x, int y, COLORREF color, const char* text);
+void DrawFilledRect(int x, int y, int w, int h);
+void DrawBorderBox(int x, int y, int w, int h, int thickness);
+void SetupDrawing(HDC hDesktop, HWND handle);
 
+
+void SetupDrawing(HDC hDesktop, HWND handle)
+{
+	HDC_Desktop = hDesktop;
+	drawHandle = handle;
+	EnemyBrush = CreateSolidBrush(RGB(255, 0, 0));
+	FriendlyBrush = CreateSolidBrush(RGB(0, 255, 0));
+	EnemyCOLOR = RGB(155, 100, 0);
+	FriendCOLOR = RGB(100, 155, 0);
+	NameCOLOR = RGB(0, 255, 0);
+}
+
+bool WorldToScreen(Vec3 In, Vec3& Out, float *ViewMatrix) {
+
+	Out.x = In.x * ViewMatrix[0] + In.y * ViewMatrix[4] + In.z * ViewMatrix[8] + ViewMatrix[12];
+	Out.y = In.x * ViewMatrix[1] + In.y * ViewMatrix[5] + In.z * ViewMatrix[9] + ViewMatrix[13];
+	Out.z = In.x * ViewMatrix[2] + In.y * ViewMatrix[6] + In.z * ViewMatrix[10] + ViewMatrix[14];
+	
+	float w = In.x * ViewMatrix[3] + In.y * ViewMatrix[7] + In.z * ViewMatrix[11] + ViewMatrix[15];
+
+	if (w < 0)
+		return false;
+
+	Out.x /= w;
+	Out.y /= w;
+	Out.z /= w;
+
+	Out.x *= 800 / 2.0f;
+	Out.x += 800 / 2.0f;
+
+	Out.y *= -600 / 2.0f;
+	Out.y += 600 / 2.0f;
+
+	return true;
+}
 
 // Takes a base address of player, and applies values with pointer offsets.
 bool ObtainPlayerData(Bypass* hook, uintptr_t bPointer, PlayerDataVector *player)
@@ -99,25 +153,27 @@ bool ObtainPlayerData(Bypass* hook, uintptr_t bPointer, PlayerDataVector *player
 	RPM = hook->Read((bPointer+offsets.playerXmouse),&player->playerXmouse,sizeof(player->playerXmouse));
 	RPM = hook->Read((bPointer+offsets.playerYmouse),&player->playerYmouse,sizeof(player->playerYmouse));
 	RPM = hook->Read((bPointer+offsets.playerXPos),&player->playerXPos,sizeof(player->playerXPos));
-	RPM = hook->Read((bPointer+offsets.playerYPos),&player->playerYPos,sizeof(player->playerYPos));
+	RPM = hook->Read((bPointer+offsets.playerZBodyPos),&player->playerZBody,sizeof(player->playerZBody));
 	RPM = hook->Read((bPointer+offsets.playerZPos),&player->playerZPos,sizeof(player->playerZPos));
-	RPM = hook->Read((bPointer+offsets.playerHeadPos),&player->playerHeadPos,sizeof(player->playerHeadPos));
+	RPM = hook->Read((bPointer+offsets.playerYPos),&player->playerYPos,sizeof(player->playerYPos));
 	RPM = hook->Read((bPointer+offsets.playerTeam),&player->playerTeam,sizeof(player->playerTeam));
+	RPM = hook->Read((bPointer + offsets.playerName), &player->playerName, sizeof(player->playerName));
 	return RPM;
 }
+
 
 void PrintOutVariables(PlayerDataVector player)
 {
 
 	printf("----------------------------------\n");
-	printf("PLAYER Team: %d \n",player.playerTeam);
+	printf("PLAYER Name: %d \n",player.playerName);
 	printf("Health: %u \n", player.playerHealth);
 	printf("Mouse X: %.6f  \n", player.playerXmouse);
 	printf("Mouse Y: %.6f \n",player.playerYmouse);
 	printf("X Position: %.6f \n",player.playerXPos);
 	printf("Y Position: %.6f \n",player.playerYPos);
-	printf("Z Position: %.6f \n",player.playerZPos);
-	printf("Head Position: %.6f \n",player.playerHeadPos);
+	printf("Z Position: %.6f \n",player.playerZBody);
+	printf("Head Position: %.6f \n",player.playerZPos);
 	printf("----------------------------------\n");
 
 }
@@ -131,7 +187,7 @@ float GetPitch(PlayerDataVector enemy, PlayerDataVector player)
 }
 float GetYaw(PlayerDataVector enemy, PlayerDataVector player)
 {
-	float yawY = -(float)atan2(enemy.playerXPos - player.playerXPos, enemy.playerHeadPos - player.playerHeadPos ) / 3.1459265f * 180 + 180;
+	float yawY = -(float)atan2(enemy.playerXPos - player.playerXPos, enemy.playerYPos - player.playerYPos ) / 3.1459265f * 180 + 180;
 	return yawY;
 
 }
@@ -141,20 +197,130 @@ float Get3dDistance(PlayerDataVector source, PlayerDataVector dest)
 	return (float)(sqrt
 		(
 	pow((source.playerXPos - dest.playerXPos),2) +
-	pow((source.playerYPos - dest.playerYPos),2) +
-	pow((source.playerHeadPos - dest.playerHeadPos),2)
+	pow((source.playerZPos - dest.playerZPos),2) +
+	pow((source.playerYPos - dest.playerYPos),2)
 ));
 }
 
-PlayerDataVector GetClosestEntity(Bypass* bypass, PlayerDataVector player)
+void DrawBorderBox(int x, int y, int w, int h, int thickness) {
+	DrawFilledRect(x, y, w, thickness);
+	DrawFilledRect(x, y, thickness, h);
+	DrawFilledRect((x+w), y, thickness, h);
+	DrawFilledRect(x, y+h, w+thickness, thickness);
+}
+
+void DrawFilledRect(int x, int y, int w, int h) {
+	RECT rect = { x , y , x + w, y + h };
+	FillRect(HDC_Desktop, &rect, currentBrush);
+}
+
+void DrawString(int x, int y, COLORREF color, const char* text)
+{
+	SetTextAlign(HDC_Desktop, TA_CENTER | TA_NOUPDATECP);
+	SetBkColor(HDC_Desktop, RGB(0, 0, 0));
+	SetBkMode(HDC_Desktop, TRANSPARENT);
+	SetTextColor(HDC_Desktop, color);
+	SelectObject(HDC_Desktop, Font);
+	TextOutA(HDC_Desktop, x, y, text, strlen(text));
+	DeleteObject(Font);
+}
+
+void DrawESP(int x, int y, float distance , PlayerDataVector target) 
+{
+	// Rectangle.
+	int width = 800 / distance;
+	int height = 600 / distance;
+	DrawBorderBox(x - (width/2), y-height, width, height*3, 1);
+	
+	//DrawLine((m_Rect.right - m_Rect.left) / 2, m_Rect.bottom - m_Rect.top, x, y, SnapLineCOLOR);
+
+	
+	stringstream ss,hp;
+	//Name
+	ss << target.playerName;
+	char *distanceInfo = new char[ss.str().size() + 1];
+	strcpy(distanceInfo, ss.str().c_str());
+	DrawString(x,y-(height*1.5), NameCOLOR,distanceInfo);
+	//Health 
+	hp<<"HP : " << target.playerHealth;
+	char *hpInfo = new char[hp.str().size() + 1];
+	strcpy(hpInfo, hp.str().c_str());
+	DrawString(x, (y+height*1.5), CurrentCOLOR, hpInfo);
+	
+	delete[] distanceInfo;
+	delete[] hpInfo;
+}
+
+
+void ESP(Bypass* bypass, int numEnt, PlayerDataVector player) {
+	
+	GetWindowRect(FindWindow(NULL, "AssaultCube"), &m_Rect);
+	uintptr_t entityListPtr = addresses.entityList;
+	DWORD ENTITY_DEREFERENCE;
+	if (!bypass->Read(entityListPtr, &ENTITY_DEREFERENCE, sizeof(ENTITY_DEREFERENCE)))
+	{
+		cout << "Cannot get entity list pointer in ESP"; delete bypass; exit(-1);
+	}
+	DWORD currentOffset = 0x04;
+	for (int i = 0; i < numEnt - 1; i++)
+	{
+		DWORD TEMP_DEREFERENCE = ENTITY_DEREFERENCE;
+		PlayerDataVector ESP_DataVector;
+		// Get dereference to current entity.
+		uintptr_t currentEntity = TEMP_DEREFERENCE + currentOffset;
+		if (!bypass->Read(currentEntity, &TEMP_DEREFERENCE, sizeof(TEMP_DEREFERENCE)))
+		{cout << "Cannot get entity: " << i; delete bypass; exit(-1);}
+		// Pointer to current entity.
+		currentEntity = TEMP_DEREFERENCE;
+		// Get Entity data.
+		if (!ObtainPlayerData(bypass, currentEntity, &ESP_DataVector))
+		{cout << "Cannot get entity: " << i << " playerdata"; delete bypass; exit(-1);}
+		// Check if dead
+		if (ESP_DataVector.playerHealth < 0) 
+		{
+			currentOffset += 0x04;
+			continue;
+		}
+		// Change color of box.
+		if (ESP_DataVector.playerTeam == player.playerTeam)
+		{
+			currentBrush = FriendlyBrush;
+			CurrentCOLOR = FriendCOLOR;
+		}
+		else
+		{
+			currentBrush = EnemyBrush;
+			CurrentCOLOR = EnemyCOLOR;
+		}
+		// Get cordinates.
+		Vec3 enemyXY;
+		Vec3 entityVEC;
+		entityVEC.x = ESP_DataVector.playerXPos;
+		entityVEC.y = ESP_DataVector.playerYPos;
+		entityVEC.z = ESP_DataVector.playerZPos;
+		
+		float viewMatrix[16];
+		// Get World Screen Matrix. make sure its correctly reading it. 
+		if (!bypass->Read(addresses.viewMatrix, &viewMatrix, sizeof(viewMatrix))) {
+			cout << "Cannot get View Matrix"; delete bypass; exit(-1);
+		}
+		
+		bool onScreen = WorldToScreen(entityVEC, enemyXY, viewMatrix);
+		if (onScreen) {
+			// On screen. DRAW distance from enemy...
+			DrawESP(enemyXY.x, enemyXY.y, Get3dDistance(player, ESP_DataVector), ESP_DataVector);
+		}
+		currentOffset += 0x04;
+	}
+	
+}
+
+
+
+PlayerDataVector GetClosestEntity(Bypass* bypass, PlayerDataVector player, int numEnt)
 {
 
-	// Get number of entites.
-	int numEntitesRead;
-	if(!bypass->Read(addresses.numEntites,&numEntitesRead,sizeof(numEntitesRead)))
-	{
-		cout << "Could not get number of entites";delete bypass;exit(-1);
-	}
+
 	// Dereference entity list pointer.
 	uintptr_t entityListPtr = addresses.entityList;
 	DWORD ENTITY_DEREFERENCE;
@@ -169,7 +335,7 @@ PlayerDataVector GetClosestEntity(Bypass* bypass, PlayerDataVector player)
 	// Entity to return.
 	PlayerDataVector closestEntityFound;
 	float closestDistance = 9999;
-	for(int i=0;i<numEntitesRead-1;i++)
+	for(int i=0;i< numEnt -1;i++)
 	{
 		// Entity to copy.
 		PlayerDataVector _entityToCopy;
@@ -187,14 +353,8 @@ PlayerDataVector GetClosestEntity(Bypass* bypass, PlayerDataVector player)
 		{
 			cout << "Cannot get entity: "<< i << " playerdata";delete bypass;exit(-1);
 		}
-		//TODO check team first..
-		int entityHP;
-		if(!bypass->Read(currentEntity+offsets.playerHealth, &entityHP, sizeof(entityHP)))
-		{
-			cout << "Cannot get entity: "<< i <<" hp..";delete bypass;exit(-1);
-		}
 		// Make sure entity is alive and is NOT on our team.
-		if(entityHP > 0 && _entityToCopy.playerTeam != player.playerTeam)
+		if(_entityToCopy.playerHealth > 0 && _entityToCopy.playerTeam != player.playerTeam)
 		{
 			float distToEnt = Get3dDistance(player,_entityToCopy);
 			if(distToEnt < closestDistance)
@@ -215,6 +375,7 @@ int main()
 	bool doExit = false;
 	bool aimBotEnabled = false;
 	bool godMode = false;
+	bool espOn = false;
 	int godModeInt = 1337;
 	int numEntitesRead;
 
@@ -228,11 +389,19 @@ int main()
 	cout << "Searching for Gamewindow. . ."<< endl;
 	HWND hwnd = FindWindow(NULL, "AssaultCube");
 	if(hwnd == NULL){cout << "Cannot locate window. . .\nExiting.";exit(-1);}
+	// Connect window handle for ESP
+	
+	TargetWnd = hwnd;
+	HDC HDC_Desktop = GetDC(TargetWnd);
+	SetupDrawing(HDC_Desktop, TargetWnd);
+	
 	cout << "Obtaining Thread PID ... "<< endl;
-
 	GetWindowThreadProcessId(hwnd,&pid);
 	if(pid==0){cout << "Cannot get PID. . . Exiting.";exit(-1);}
 	cout << "Attempting to open handle on process: "<<pid<<" ..."<<endl;
+
+	
+	
 
 	Bypass* bypass = new Bypass();
 	if (!bypass->Attach(pid)){
@@ -246,6 +415,11 @@ int main()
 	// Aimbot loop
 	while(!doExit)
 		{
+			system("clear");
+			printf("Tap F1 to toggle Aim bot \n");
+			printf("Tap F2 to toggle Infinite HP+Ammo \n");
+			printf("Tap F3 to toggle ESP(Still in progess...) \n");
+			printf("Press F4 to  Quit Program. \n");
 			if(!bypass->Read(addresses.numEntites,&numEntitesRead,sizeof(numEntitesRead))){
 				cout << "Could not read number of entites..";delete bypass;exit(-1);
 			}
@@ -256,8 +430,14 @@ int main()
 				cout << "Could not read all player memory. . . ";delete bypass;exit(-1);
 			}
 			// Get closest enitity.
-			closestEntity = GetClosestEntity(bypass,currentPlayer);
+			closestEntity = GetClosestEntity(bypass,currentPlayer,numEntitesRead);
 			//closestEntity = targetEnt;
+			if (espOn) 
+			{
+				
+				ESP(bypass,numEntitesRead,currentPlayer);
+			}
+			
 			if(godMode)
 			{
 				//GIVE HEALTH + AMMO
@@ -276,16 +456,13 @@ int main()
 					exit(-1);
 				}
 			}
-			system("clear");
-			printf("Tap F1 to toggle Aim bot \n");
-			printf("Tap F2 to toggle Infinite HP+Ammo \n");
-			printf("Tap F3 to toggle ESP(Still in progess...) \n");
-			printf("Press F4 to  Quit Program. \n");
+			
 			printf("%s \n", aimBotEnabled ? "Aimbot: Enabled" : "Aimbot: Disabled");
 			printf("%s \n", godMode ? "Godmode: Enabled" : "Godmode: Disabled");
+			printf("%s \n", ESP ? "ESP: Enabled" : "ESP: Disabled");
 			printf("NUMBER OF ENTITES: %d \n",numEntitesRead);
 			printf("DIST TO CLOSEST ENEMY: %.6f \n",Get3dDistance(currentPlayer,closestEntity));
-			PrintOutVariables(closestEntity);
+			//PrintOutVariables(closestEntity);
 			fflush(stdout);
 			if(GetAsyncKeyState(VK_F4))
 			{
@@ -294,6 +471,10 @@ int main()
 			if(GetAsyncKeyState(VK_F2))
 			{
 				godMode = !godMode;
+			}
+			if (GetAsyncKeyState(VK_F3))
+			{
+				espOn = !espOn;
 			}
 			if(GetAsyncKeyState(VK_F1))
 			{
@@ -309,7 +490,7 @@ int main()
 				status = !bypass->Write((BASE_ADDRESS+offsets.playerXmouse),&newX,sizeof(newX));
 				status = !bypass->Write((BASE_ADDRESS+offsets.playerYmouse),&newY,sizeof(newY));
 			}
-			if(!aimBotEnabled){Sleep(50);}
+			
 		}
 	;
 	cout << "Exiting . . ." << endl;
