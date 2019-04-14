@@ -16,9 +16,7 @@ RECT m_Rect;
 HWND TargetWnd;
 HWND drawHandle;
 DWORD DwProcId;
-COLORREF EnemyCOLOR;
-COLORREF FriendCOLOR;
-COLORREF CurrentCOLOR;
+COLORREF HPCOLOR;
 COLORREF NameCOLOR;
 
 
@@ -116,9 +114,8 @@ void SetupDrawing(HDC hDesktop, HWND handle)
 	drawHandle = handle;
 	EnemyBrush = CreateSolidBrush(RGB(255, 0, 0));
 	FriendlyBrush = CreateSolidBrush(RGB(0, 255, 0));
-	EnemyCOLOR = RGB(155, 100, 0);
-	FriendCOLOR = RGB(100, 155, 0);
-	NameCOLOR = RGB(0, 255, 0);
+	NameCOLOR = RGB(255, 255, 0);
+	HPCOLOR = RGB(0, 255, 0);
 }
 
 bool WorldToScreen(Vec3 In, Vec3& Out, float *ViewMatrix) {
@@ -230,24 +227,17 @@ void DrawESP(int x, int y, float distance , PlayerDataVector target)
 	// Rectangle.
 	int width = 800 / distance;
 	int height = 600 / distance;
-	DrawBorderBox(x - (width/2), y-height, width, height*3, 1);
+	DrawBorderBox(x - (width/2), y, width, height*3.3, 1.8);
 	
 	//DrawLine((m_Rect.right - m_Rect.left) / 2, m_Rect.bottom - m_Rect.top, x, y, SnapLineCOLOR);
 
 	
-	stringstream ss,hp;
-	//Name
-	ss << target.playerName;
-	char *distanceInfo = new char[ss.str().size() + 1];
-	strcpy(distanceInfo, ss.str().c_str());
-	DrawString(x,y-(height*1.5), NameCOLOR,distanceInfo);
+	stringstream hp;
 	//Health 
 	hp<<"HP : " << target.playerHealth;
 	char *hpInfo = new char[hp.str().size() + 1];
 	strcpy(hpInfo, hp.str().c_str());
-	DrawString(x, (y+height*1.5), CurrentCOLOR, hpInfo);
-	
-	delete[] distanceInfo;
+	DrawString(x, (y+height*2), NameCOLOR, hpInfo);
 	delete[] hpInfo;
 }
 
@@ -285,12 +275,10 @@ void ESP(Bypass* bypass, int numEnt, PlayerDataVector player) {
 		if (ESP_DataVector.playerTeam == player.playerTeam)
 		{
 			currentBrush = FriendlyBrush;
-			CurrentCOLOR = FriendCOLOR;
 		}
 		else
 		{
 			currentBrush = EnemyBrush;
-			CurrentCOLOR = EnemyCOLOR;
 		}
 		// Get cordinates.
 		Vec3 enemyXY;
@@ -306,6 +294,7 @@ void ESP(Bypass* bypass, int numEnt, PlayerDataVector player) {
 		}
 		
 		bool onScreen = WorldToScreen(entityVEC, enemyXY, viewMatrix);
+
 		if (onScreen) {
 			// On screen. DRAW distance from enemy...
 			DrawESP(enemyXY.x, enemyXY.y, Get3dDistance(player, ESP_DataVector), ESP_DataVector);
@@ -316,6 +305,51 @@ void ESP(Bypass* bypass, int numEnt, PlayerDataVector player) {
 }
 
 
+
+// Set values of key presses (prevents spam)
+void CheckKeyStatus(int &f1, int &f2, int &f3) 
+{
+	if (!(GetKeyState(112) & 0x8000))
+	{
+		f1 = 0;
+	}
+
+	if (!(GetKeyState(113) & 0x8000))
+	{
+		f2 = 0;
+	}
+
+	if (!(GetKeyState(114) & 0x8000))
+	{
+		f3 = 0;
+	}
+}
+
+void PostStatusToGUI(bool aimBot, bool Godmode, bool esp)
+{
+	stringstream aimbotStatus,godmodeStatus,espStatus,instructions;
+	//Health 
+	if (aimBot==true) {aimbotStatus << "Aimbot:  ON";}
+	else {aimbotStatus << "Aimbot: OFF";}
+	if (Godmode == true) { godmodeStatus << "Godmode: ON";}
+	else { godmodeStatus << "Godmode: OFF";}
+	if (esp == true) {espStatus << "ESP:     ON";}
+	else {espStatus << "ESP:     OFF";}
+	instructions << "F1: Aimbot | F2: Godmode | F3: ESP | F4: Quit ";
+
+	char *INST = new char[instructions.str().size() + 1]; strcpy(INST, instructions.str().c_str());
+	char *AB = new char[aimbotStatus.str().size() + 1];strcpy(AB, aimbotStatus.str().c_str());
+	char *GM = new char[godmodeStatus.str().size() + 1];strcpy(GM, godmodeStatus.str().c_str());
+	char *ESP = new char[espStatus.str().size() + 1];strcpy(ESP, espStatus.str().c_str());
+	
+	DrawString(550, 5, HPCOLOR, INST);
+	DrawString(455, 25, HPCOLOR, AB);
+	DrawString(455, 45, HPCOLOR, GM);
+	DrawString(455, 65, HPCOLOR, ESP);
+	
+	delete[] AB,GM,ESP,INST;
+
+}
 
 PlayerDataVector GetClosestEntity(Bypass* bypass, PlayerDataVector player, int numEnt)
 {
@@ -353,9 +387,10 @@ PlayerDataVector GetClosestEntity(Bypass* bypass, PlayerDataVector player, int n
 		{
 			cout << "Cannot get entity: "<< i << " playerdata";delete bypass;exit(-1);
 		}
-		// Make sure entity is alive and is NOT on our team.
+		// Make sure entity is alive and is NOT on our team AND we are looking at their direction.
 		if(_entityToCopy.playerHealth > 0 && _entityToCopy.playerTeam != player.playerTeam)
 		{
+			
 			float distToEnt = Get3dDistance(player,_entityToCopy);
 			if(distToEnt < closestDistance)
 			{
@@ -378,6 +413,10 @@ int main()
 	bool espOn = false;
 	int godModeInt = 1337;
 	int numEntitesRead;
+	int godModePressed = 0;
+	int espKeyPressed = 0;
+	int aimbotPressed = 0;
+
 
 	PlayerDataVector currentPlayer;
 	PlayerDataVector closestEntity;
@@ -386,7 +425,7 @@ int main()
 	DWORD pid=0;
 	DWORD BASE_DEREFERENCE = 0x0;
 
-	cout << "Searching for Gamewindow. . ."<< endl;
+	cout << "Searching for Gamewindow..."<< endl;
 	HWND hwnd = FindWindow(NULL, "AssaultCube");
 	if(hwnd == NULL){cout << "Cannot locate window. . .\nExiting.";exit(-1);}
 	// Connect window handle for ESP
@@ -400,9 +439,6 @@ int main()
 	if(pid==0){cout << "Cannot get PID. . . Exiting.";exit(-1);}
 	cout << "Attempting to open handle on process: "<<pid<<" ..."<<endl;
 
-	
-	
-
 	Bypass* bypass = new Bypass();
 	if (!bypass->Attach(pid)){
 		cout << "OpenProcess failed. GetLastError = " << dec << GetLastError() << endl;delete bypass;exit(-1);
@@ -411,15 +447,11 @@ int main()
 		cout << "Could not get player base address pointer. . . " << endl;delete bypass;exit(-1);
 	}
 	BASE_ADDRESS = BASE_DEREFERENCE;
+	cout << "Cheats enabled ... F4 to EXIT" << endl;
 
 	// Aimbot loop
 	while(!doExit)
 		{
-			system("clear");
-			printf("Tap F1 to toggle Aim bot \n");
-			printf("Tap F2 to toggle Infinite HP+Ammo \n");
-			printf("Tap F3 to toggle ESP(Still in progess...) \n");
-			printf("Press F4 to  Quit Program. \n");
 			if(!bypass->Read(addresses.numEntites,&numEntitesRead,sizeof(numEntitesRead))){
 				cout << "Could not read number of entites..";delete bypass;exit(-1);
 			}
@@ -432,52 +464,41 @@ int main()
 			// Get closest enitity.
 			closestEntity = GetClosestEntity(bypass,currentPlayer,numEntitesRead);
 			//closestEntity = targetEnt;
-			if (espOn) 
-			{
-				
-				ESP(bypass,numEntitesRead,currentPlayer);
-			}
+			if (espOn) {ESP(bypass,numEntitesRead,currentPlayer);}
 			
 			if(godMode)
 			{
 				//GIVE HEALTH + AMMO
 				if(!bypass->Write((BASE_ADDRESS+offsets.assaultRifleAmmo),&godModeInt,sizeof(godModeInt)))
 				{
-					cout << "Could not write to player ammo memory. . .";
-					cout << "Exiting . . ." << endl;
-					delete bypass;
-					exit(-1);
+					cout << "Could not write to player ammo memory. . .";delete bypass;exit(-1);
 				}
 				if(!bypass->Write((BASE_ADDRESS+offsets.playerHealth),&godModeInt,sizeof(godModeInt)))
 				{
-					cout << "Could not write to player health memory. . . ";
-					cout << "Exiting . . ." << endl;
-					delete bypass;
-					exit(-1);
+					cout << "Could not write to player health memory. . . ";delete bypass;exit(-1);
 				}
 			}
 			
-			printf("%s \n", aimBotEnabled ? "Aimbot: Enabled" : "Aimbot: Disabled");
-			printf("%s \n", godMode ? "Godmode: Enabled" : "Godmode: Disabled");
-			printf("%s \n", ESP ? "ESP: Enabled" : "ESP: Disabled");
-			printf("NUMBER OF ENTITES: %d \n",numEntitesRead);
-			printf("DIST TO CLOSEST ENEMY: %.6f \n",Get3dDistance(currentPlayer,closestEntity));
-			//PrintOutVariables(closestEntity);
-			fflush(stdout);
+		
+			
+			
 			if(GetAsyncKeyState(VK_F4))
 			{
 				doExit = true;
 			}
-			if(GetAsyncKeyState(VK_F2))
+			if(GetAsyncKeyState(VK_F2) && godModePressed==0)
 			{
+				godModePressed = 1;
 				godMode = !godMode;
 			}
-			if (GetAsyncKeyState(VK_F3))
+			if (GetAsyncKeyState(VK_F3) && espKeyPressed == 0)
 			{
+				espKeyPressed = 1;
 				espOn = !espOn;
 			}
-			if(GetAsyncKeyState(VK_F1))
+			if(GetAsyncKeyState(VK_F1) && aimbotPressed == 0)
 			{
+				aimbotPressed = 1;
 				aimBotEnabled = !aimBotEnabled;
 			}
 
@@ -490,9 +511,13 @@ int main()
 				status = !bypass->Write((BASE_ADDRESS+offsets.playerXmouse),&newX,sizeof(newX));
 				status = !bypass->Write((BASE_ADDRESS+offsets.playerYmouse),&newY,sizeof(newY));
 			}
+			CheckKeyStatus(aimbotPressed, godModePressed, espKeyPressed);
+			PostStatusToGUI(aimBotEnabled, godMode, espOn);
+			
+			
 			
 		}
 	;
-	cout << "Exiting . . ." << endl;
+	cout << "Exiting ..." << endl;
 	exit(0);
 }
