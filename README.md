@@ -17,7 +17,9 @@ baba_yaga.cpp
 A more refined aimbot.
 
 External hack for "Counterstrike: Global Offensive"
+
 Current Capabilitys:
+
 ESP: 
 -Illuminate all enemy entites
 -Illuminate all friendly entites
