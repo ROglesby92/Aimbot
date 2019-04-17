@@ -14,7 +14,7 @@ Godmode- Infinite HP + Ammo by writing to players memory.
 
 baba_yaga.cpp 
 
-A Mmuch more refined aimbot.
+A more refined aimbot.
 
 External hack for "Counterstrike: Global Offensive"
 Current Capabilitys:
