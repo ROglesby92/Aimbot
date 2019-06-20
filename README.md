@@ -1,18 +1,7 @@
 # Aimbot
 First attempt at reading and manipulating game data through process memory.
-First game was using AssaultCube, got the basics of finding player memory, locations , math to get vectors.
-Currently working on a CSGO external hack.
 
-
-MemReader.cpp 
-
-Game: AssaultCube
-Aimbot - Auto target closest enemy Entity player's head
-ESP    - Projects square around target players using World To Screen calcuations
-Godmode- Infinite HP + Ammo by writing to players memory.
-
-
-baba_yaga.cpp 
+csgo_script.cpp
 
 A more refined aimbot.
 
